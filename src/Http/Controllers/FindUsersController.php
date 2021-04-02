@@ -11,6 +11,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 class FindUsersController
 {
+    const LIMIT_DEFAULT = 20;
+    
     /** @var LocalUsersRepository */
     private $localUsersRepository;
 
@@ -26,14 +28,21 @@ class FindUsersController
     public function __invoke(Request $request, Response $response): Response
     {
         $query = $request->getQueryParams()['q'] ?? '';
-        $limit = $request->getQueryParams()['limit'] ?? 0;
+        $limit = $request->getQueryParams()['limit'] ?? self::LIMIT_DEFAULT;
 
         $login = new Login($query);
 
-        // FIXME: Se debe tener cuidado en la implementación
-        // para que siga las notas del documento de requisitos
         $localUsers = $this->localUsersRepository->findByLogin($login, $limit);
-        $githubUsers = $this->gitHubUsersRepository->findByLogin($login, $limit);
+
+        // Obtener el límite máximo de usuarios GitHub que faltan
+        $limitGitHub = max(floor($limit / 2), $limit - count($localUsers));
+        $githubUsers = $this->gitHubUsersRepository->findByLogin($login, $limitGitHub);
+
+        // Cortar parte de usuarios locales para respetar el limite
+        if ($limit < (count($localUsers) + count($githubUsers))) {
+            $limitLocal = $limit - $limitGitHub;
+            $localUsers = $localUsers->slice(0, $limitLocal);
+        }
 
         $users = $localUsers->merge($githubUsers)->map(function (User $user) {
             return [
